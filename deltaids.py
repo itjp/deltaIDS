@@ -1,9 +1,11 @@
-#! /bin/usr/python
-
 """
-	pyDelta IDS
-	@author: Dropkick
-	@date: 12.4.2013
+	Delta Intrusion Detection System
+		
+		A simple IDS, it gets a base system reading, then compares values against it with the check command.
+		Best if run with a program such as supervisord
+
+		@author: Dropkick
+		@date: 12.4.2013
 """
 import socket
 import optparse
@@ -12,6 +14,7 @@ import configparser
 import smtplib
 import urllib.request
 import email
+import pwd
 
 from email.mime.text import MIMEText
 
@@ -19,6 +22,7 @@ version = '0.1'
 
 #Log files
 port_log = '.ports'
+user_log = '.users'
 machine_ip = str(urllib.request.urlopen('http://www.myexternalip.com/raw').read().decode('utf-8'))
 
 class Scanner(object):
@@ -51,7 +55,7 @@ class Scanner(object):
 		"""Writes results of a port scan to log file"""
 		f = open(port_log, 'w')
 		for port in self.open_port_list:
-			logging.info('[+] Port '+str(port)+' open.')
+			logging.info('[+] Port :'+str(port)+' open.')
 			f.write(str(port)+'\n')
 		f.close()
 
@@ -61,37 +65,78 @@ class Scanner(object):
 
 		f = open(port_log, 'r')
 		previous_open_ports = f.readlines()
-		cleaned_previous_open_ports = []
+		cleaned_previous_open_ports = stripped_log(previous_open_ports)
 		f.close()
 		
-		for line in previous_open_ports:
-			cleaned_previous_open_ports.append(line.replace('\n',''))
-
 		for port in self.open_port_list:
 			if port not in cleaned_previous_open_ports:
 				logging.info('[!] '+str(port)+" is now open")
 				issue_alert('[!] Port '+str(port)+' is now open.')
 
+class UserMonitor(object):
+	
+	def __init__(self):
+		self.known_user_list = []
+	
+	def scan(self, save=False):
+		logging.info('Checking users...')
+		"""Find all users on the system"""
+		users = pwd.getpwall()
+		for user in users:
+			self.known_user_list.append(user.pw_name)
+			if save:
+				self.write_to_log()
+
+	def write_to_log(self):
+		f = open(user_log, 'w')
+		for user in self.known_user_list:
+			logging.info('[+] Found user: '+user)
+			f.write(user+'\n')
+		f.close()
+
+	def compare_to_log(self):
+		self.scan()
+
+		f = open(user_log, 'r')
+		previous_known_users = f.readlines()
+		cleaned_previous_known_users = stripped_log(previous_known_users)
+		f.close()
+
+		for user in self.known_user_list:
+			if user not in cleaned_previous_known_users:
+				logging.info('[!] User '+user+' created')
+				issue_alert('[!] User '+user+' created')
 
 
 class DeltaIDS(object):
 
 	def __init__(self):
 		"""Do nothing for now, and oh it does it so well"""
-		pass
+		self.scanner = Scanner('localhost')
+		self.user_monitor = UserMonitor()
 
-	def init_port_checker(self):
-		"""Get the initially open ports"""
-		logging.info('Running an initialzing scan...')
-		scanner = Scanner('localhost')
-		scanner.scan(True)
+	def initialize(self):
+		"""Get the system base settings"""
+		logging.info('Initializing system base state...')
 
-	def comp_port_checker(self):
-		"""Run a comparative check against the known open ports"""
+		self.scanner.scan(True)
+		self.user_monitor.scan(True)
+
+
+	def compare(self):
+		"""Run a comparative check against the last recorded state of computer"""
 		logging.info('Running a comparative scan...')
-		scanner = Scanner('localhost')
-		scanner.compare_to_log()
+		
+		self.scanner.compare_to_log()
+		self.user_monitor.compare_to_log()
 
+
+def stripped_log(logfile):
+	"""Return a cleaned array from a logfile"""
+	cleaned_logfile = []
+	for line in logfile:
+		cleaned_logfile.append(line.replace('\n',''))
+	return cleaned_logfile
 
 def issue_alert(message):
 	message = message + '\n\n Originated from '+machine_ip
@@ -129,6 +174,8 @@ if __name__ == "__main__":
 	(options, args) = parser.parse_args()
 	
 	if(options.initialize):
-		delta.init_port_checker()
+		delta.initialize()
 	elif(options.check):
-		delta.comp_port_checker()
+		delta.compare()
+	
+	logging.info('DONE!')
