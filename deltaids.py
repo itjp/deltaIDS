@@ -8,12 +8,18 @@
 import socket
 import optparse
 import logging
+import configparser
+import smtplib
+import urllib.request
+import email
+
+from email.mime.text import MIMEText
 
 version = '0.1'
-logging.basicConfig(filename='delta.log',level=logging.DEBUG)
 
 #Log files
-port_log = '.port_log'
+port_log = '.ports'
+machine_ip = str(urllib.request.urlopen('http://www.myexternalip.com/raw').read().decode('utf-8'))
 
 class Scanner(object):
 
@@ -64,8 +70,11 @@ class Scanner(object):
 		for port in self.open_port_list:
 			if port not in cleaned_previous_open_ports:
 				logging.info('[!] '+str(port)+" is now open")
+				issue_alert('[!] Port '+str(port)+' is now open.')
 
-class pyDelta(object):
+
+
+class DeltaIDS(object):
 
 	def __init__(self):
 		"""Do nothing for now, and oh it does it so well"""
@@ -83,9 +92,36 @@ class pyDelta(object):
 		scanner = Scanner('localhost')
 		scanner.compare_to_log()
 
+
+def issue_alert(message):
+	message = message + '\n\n Originated from '+machine_ip
+	alert = email.mime.text.MIMEText(message, _charset='utf-8')
+	alert['From'] = "DeltaIDS@localhost.com"
+	alert['To'] = R_EMAIL
+	alert['Subject'] = email.header.Header("!INTRUSION DETECTED!", 'utf-8')
+	
+	logging.debug('[DEBUG] Sending email...')
+	s = smtplib.SMTP('localhost')
+	s.send_message(alert)
+	s.quit()
+
+def read_configuration():
+	config = configparser.ConfigParser()
+	config.read('config.ini')
+	
+	R_LOG = config['REPORTING']['logfile']
+	logging.basicConfig(filename=str(R_LOG), level=logging.DEBUG)
+
+	global R_EMAIL
+	R_EMAIL = config['REPORTING']['email']
+	R_EMAIL = R_EMAIL.replace(' ','')
+	logging.debug('[DEBUG] ALERT EMAILS: '+str(R_EMAIL))
+
+
 if __name__ == "__main__":
+	read_configuration()
 	parser = optparse.OptionParser()
-	delta = pyDelta()
+	delta = DeltaIDS()
 
 	parser.add_option('-i', '--init', action='store_true', dest='initialize', default=False, help='Write inital values to log files')
 	parser.add_option('-c', '--check', action='store_true', dest='check', default=False, help='Check system settings against log files')
@@ -96,4 +132,3 @@ if __name__ == "__main__":
 		delta.init_port_checker()
 	elif(options.check):
 		delta.comp_port_checker()
-		
