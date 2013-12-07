@@ -7,6 +7,7 @@
 		@author: Dropkick
 		@date: 12.4.2013
 """
+import sys
 import socket
 import optparse
 import logging
@@ -84,8 +85,8 @@ class UserMonitor(object):
 		users = pwd.getpwall()
 		for user in users:
 			self.known_user_list.append(user.pw_name)
-			if save:
-				self.write_to_log()
+		if save:
+			self.write_to_log()
 
 	def write_to_log(self):
 		f = open(user_log, 'w')
@@ -153,9 +154,9 @@ def issue_alert(message):
 def read_configuration():
 	config = configparser.ConfigParser()
 	config.read('config.ini')
-	
+
 	R_LOG = config['REPORTING']['logfile']
-	logging.basicConfig(filename=str(R_LOG), level=logging.DEBUG)
+	logging.basicConfig(filename=str(R_LOG), format='%(asctime)s %(message)s', level=logging.DEBUG)
 
 	global R_EMAIL
 	R_EMAIL = config['REPORTING']['email']
@@ -165,14 +166,20 @@ def read_configuration():
 
 if __name__ == "__main__":
 	read_configuration()
-	parser = optparse.OptionParser()
+	parser = optparse.OptionParser(version="%prog "+version)
 	delta = DeltaIDS()
 
 	parser.add_option('-i', '--init', action='store_true', dest='initialize', default=False, help='Write inital values to log files')
 	parser.add_option('-c', '--check', action='store_true', dest='check', default=False, help='Check system settings against log files')
+	parser.add_option('-v', action='store_true', dest='verbose', default=False, help='verbose mode')
 
 	(options, args) = parser.parse_args()
 	
+	if(options.verbose):
+		root_logger = logging.getLogger()
+		c_out = logging.StreamHandler(sys.stdout)
+		root_logger.addHandler(c_out)	
+
 	if(options.initialize):
 		delta.initialize()
 	elif(options.check):
