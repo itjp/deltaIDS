@@ -8,6 +8,7 @@
 		@date: 12.4.2013
 """
 import os
+import subprocess
 import sys
 import socket
 import optparse
@@ -18,14 +19,19 @@ import urllib.request
 import email
 import pwd
 import time
+import struct
 
+from IPy import IP
 from email.mime.text import MIMEText
+
+# Version
 version = '0.1'
 
-#Log files
+# Log files
 port_log = '.ports'
 user_log = '.users'
 logm_log = '.logs'
+macs_log = '.macs'
 
 machine_ip = str(urllib.request.urlopen('http://www.myexternalip.com/raw').read().decode('utf-8'))
 
@@ -59,7 +65,7 @@ class Scanner(object):
 		"""Writes results of a port scan to log file"""
 		f = open(port_log, 'w')
 		for port in self.open_port_list:
-			logging.info('[+] Port :'+str(port)+' open.')
+			logging.info('[+] Port:'+str(port)+' open.')
 			f.write(str(port)+'\n')
 		f.close()
 
@@ -115,8 +121,7 @@ class UserMonitor(object):
 
 class LogMonitor(object):
 
-	def __init__(self, threshold, auth_log_location='/var/log/auth.log'):
-		self.threshold = threshold
+	def __init__(self, auth_log_location='/var/log/auth.log'):
 		self.auth_log_location = auth_log_location
 
 	def scan(self, save=False):
@@ -131,25 +136,60 @@ class LogMonitor(object):
 		f.write(str(self.auth_size))
 		f.close()
 
-	def compare_to_log(self):
+	def compare_to_log(self, threshold):
 		self.scan()
 		
 		f = open(logm_log, 'r')
 		previous_auth_size = f.read()
 		f.close()
 
-		if(int(previous_auth_size) + self.threshold < self.auth_size):
+		if(int(previous_auth_size) + threshold < self.auth_size):
 			logging.info('[!] Log increased by '+str(self.auth_size - int(previous_auth_size)))
-			issue_alert('[!] Log increased '+str(self.auth_size - int(previous_auth_size)))
+			issue_alert('[!] Log increased by'+str(self.auth_size - int(previous_auth_size)))
+
+class ARPMonitor(object):
+
+	def __init__(self):
+		pass
+
+	def get_gateway_ip(self):
+		self.gateway_ip = subprocess.check_output("cat /proc/net/route | grep 00000000 | awk '{ print $3 }' | grep -v '00000000'", shell=True)
+		self.gateway_ip = IP(struct.unpack('<I', struct.pack('>I', int(self.gateway_ip, 16)))[0])
+		logging.debug('[DEBUG] Gateway IP: '+str(self.gateway_ip))
+
+	def scan(self, save=False):
+		logging.info('Checking Gateway MAC...')
+		self.get_gateway_ip()
+
+		self.gateway_mac = subprocess.check_output("cat /proc/net/arp | grep '"+str(self.gateway_ip)+" ' | awk '{ print $4 }'", shell=True, universal_newlines=True).replace('\n','')
+		logging.info('[+] Gateway MAC: '+str(self.gateway_mac))
+
+		if save:
+			self.write_to_log()
+
+	def write_to_log(self):
+		f = open(macs_log, 'w')
+		f.write(str(self.gateway_mac))
+		f.close()
+
+	def compare_to_log(self):
+		self.scan()
+		f = open(macs_log, 'r')
+		previous_mac = f.read()
+		f.close()
+		if str(previous_mac) != str(self.gateway_mac):
+			logging.info('[!] Gateway mac address has changed to '+str(self.gateway_mac))
+			issue_alert('[!] Gateway mac address has changed to '+str(self.gateway_mac))
 
 
 class DeltaIDS(object):
 
-	def __init__(self, threshold=500):
+	def __init__(self):
 		"""Do nothing for now, and oh it does it so well"""
 		self.scanner = Scanner('localhost')
 		self.user_monitor = UserMonitor()
-		self.log_monitor = LogMonitor(threshold)
+		self.log_monitor = LogMonitor()
+		self.arp_monitor = ARPMonitor()
 
 	def initialize(self):
 		"""Get the system base settings"""
@@ -158,6 +198,7 @@ class DeltaIDS(object):
 		self.scanner.scan(True)
 		self.user_monitor.scan(True)
 		self.log_monitor.scan(True)
+		self.arp_monitor.scan(True)
 
 
 	def compare(self):
@@ -166,7 +207,8 @@ class DeltaIDS(object):
 		
 		self.scanner.compare_to_log()
 		self.user_monitor.compare_to_log()
-		self.log_monitor.compare_to_log()
+		self.log_monitor.compare_to_log(L_THRESH)
+		self.arp_monitor.compare_to_log()
 
 
 def stripped_log(logfile):
@@ -200,15 +242,15 @@ def read_configuration():
 	R_EMAIL = R_EMAIL.replace(' ','')
 	logging.debug('[DEBUG] ALERT EMAILS: '+str(R_EMAIL))
 
-	global W_USERS
-	W_USERS = config['WHITELIST']['users']
-	W_USERS = W_USERS.replace(' ','')
-	logging.debug('[DEBUG] WHITELISTED USERS: '+str(W_USERS))
+	global R_FREQUENCY
+	R_FREQUENCY = config['REPORTING']['frequency']
+	R_FREQUENCY = int(R_FREQUENCY)
+	logging.debug('[DEBUG] REPORTING FRQUENCY: '+str(R_FREQUENCY))
 
 	global L_THRESH
 	L_THRESH = int(config['REPORTING']['threshold'])
 
-if __name__ == "__main__":
+def main():
 	read_configuration()
 	parser = optparse.OptionParser(version="%prog "+version)
 
@@ -223,11 +265,13 @@ if __name__ == "__main__":
 		c_out = logging.StreamHandler(sys.stdout)
 		root_logger.addHandler(c_out)	
 
-	delta = DeltaIDS(L_THRESH)
+	delta = DeltaIDS()
 	
 	if(options.initialize):
 		delta.initialize()
 	elif(options.check):
 		delta.compare()
-	
-	logging.info('DONE!')
+	logging.info('...Scan complete')
+
+if __name__ == "__main__":
+	main()
