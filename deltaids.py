@@ -23,6 +23,7 @@ import struct
 
 from IPy import IP
 from email.mime.text import MIMEText
+from gi.repository import Notify
 
 # Version
 version = '0.1'
@@ -32,8 +33,6 @@ port_log = '.ports'
 user_log = '.users'
 logm_log = '.logs'
 macs_log = '.macs'
-
-machine_ip = str(urllib.request.urlopen('http://www.myexternalip.com/raw').read().decode('utf-8'))
 
 class Scanner(object):
 
@@ -81,7 +80,7 @@ class Scanner(object):
 		for port in self.open_port_list:
 			if port not in cleaned_previous_open_ports:
 				logging.info('[!] '+str(port)+" is now open")
-				issue_alert('[!] Port '+str(port)+' is now open.')
+				issue_alert('Port '+str(port)+' is now open.')
 
 
 class UserMonitor(object):
@@ -116,7 +115,7 @@ class UserMonitor(object):
 		for user in self.known_user_list:
 			if user not in cleaned_previous_known_users:
 				logging.info('[!] User '+user+' created')
-				issue_alert('[!] User '+user+' created')
+				issue_alert('User '+user+' created')
 
 
 class LogMonitor(object):
@@ -145,7 +144,7 @@ class LogMonitor(object):
 
 		if(int(previous_auth_size) + threshold < self.auth_size):
 			logging.info('[!] Log increased by '+str(self.auth_size - int(previous_auth_size)))
-			issue_alert('[!] Log increased by'+str(self.auth_size - int(previous_auth_size)))
+			issue_alert('Log increased by'+str(self.auth_size - int(previous_auth_size)))
 
 class ARPMonitor(object):
 
@@ -179,7 +178,7 @@ class ARPMonitor(object):
 		f.close()
 		if str(previous_mac) != str(self.gateway_mac):
 			logging.info('[!] Gateway mac address has changed to '+str(self.gateway_mac))
-			issue_alert('[!] Gateway mac address has changed to '+str(self.gateway_mac))
+			issue_alert('Gateway mac address has changed to '+str(self.gateway_mac))
 
 
 class DeltaIDS(object):
@@ -218,37 +217,60 @@ def stripped_log(logfile):
 		cleaned_logfile.append(line.replace('\n',''))
 	return cleaned_logfile
 
-def issue_alert(message):
-	message = message + '\n\n Originated from '+machine_ip
-	alert = email.mime.text.MIMEText(message, _charset='utf-8')
-	alert['From'] = "DeltaIDS@localhost.com"
-	alert['To'] = R_EMAIL
-	alert['Subject'] = email.header.Header("!INTRUSION DETECTED!", 'utf-8')
+def issue_alert(msg):
+
+	if A_EMAIL:
+		message = msg + '\n\n Originated from '+str(R_MACHINE_NAME)
+		alert = email.mime.text.MIMEText(message, _charset='utf-8')
+		alert['From'] = "DeltaIDS@localhost.com"
+		alert['To'] = R_EMAIL
+		alert['Subject'] = email.header.Header("!INTRUSION DETECTED!", 'utf-8')
 	
-	logging.debug('[DEBUG] Sending email...')
-	s = smtplib.SMTP('localhost')
-	s.send_message(alert)
-	s.quit()
+		logging.debug('[DEBUG] Sending email...')
+		s = smtplib.SMTP('localhost')
+		s.send_message(alert)
+		s.quit()
+
+	if A_POPUP:
+		logging.debug('[DEBUG] Sending popup...')
+		Notify.init("DeltaIDS - Alert")
+		Alert = Notify.Notification.new("DeltaIDS Alert",str(msg), "dialog-warning")
+		Alert.show()
+
 
 def read_configuration():
 	config = configparser.ConfigParser()
 	config.read('config.ini')
 
+	global R_LOG
 	R_LOG = config['REPORTING']['logfile']
 	logging.basicConfig(filename=str(R_LOG), format='%(asctime)s %(message)s', level=logging.DEBUG)
 
-	global R_EMAIL
-	R_EMAIL = config['REPORTING']['email']
-	R_EMAIL = R_EMAIL.replace(' ','')
-	logging.debug('[DEBUG] ALERT EMAILS: '+str(R_EMAIL))
+	global R_MACHINE_NAME
+	R_MACHINE_NAME = str(config['REPORTING']['name'])
 
-	global R_FREQUENCY
-	R_FREQUENCY = config['REPORTING']['frequency']
-	R_FREQUENCY = int(R_FREQUENCY)
-	logging.debug('[DEBUG] REPORTING FRQUENCY: '+str(R_FREQUENCY))
+	global R_EMAIL
+	if config['REPORTING']['email'] != "":
+		R_EMAIL = config['REPORTING']['email']
+		R_EMAIL = R_EMAIL.replace(' ','')
+		logging.debug('[DEBUG] ALERT EMAILS: '+str(R_EMAIL))
+	else:
+		R_EMAIL = 'mail@example.com'
 
 	global L_THRESH
 	L_THRESH = int(config['REPORTING']['threshold'])
+
+	global A_EMAIL
+	if config['alerts']['email'].lower() == 'true':
+		A_EMAIL = True
+	else:
+		A_EMAIL = False 
+
+	global A_POPUP
+	if config['alerts']['popup'].lower() == 'true':
+		A_POPUP = True
+	else:
+		A_POPUP = False
 
 def main():
 	read_configuration()
