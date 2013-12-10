@@ -18,6 +18,7 @@ python deltaids.py -c
 This will compare the base system against your prior initializing scan.
 
 <h1>ToDo</h1>
+- More error handling
 - Possibly Daemonize
 - Add more functionality (DUH!)
 - Ability to turn scans off and on through config.ini
