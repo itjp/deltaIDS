@@ -7,6 +7,7 @@
 		@author: Dropkick
 		@date: 12.4.2013
 """
+import os
 import sys
 import socket
 import optparse
@@ -16,14 +17,16 @@ import smtplib
 import urllib.request
 import email
 import pwd
+import time
 
 from email.mime.text import MIMEText
-
 version = '0.1'
 
 #Log files
 port_log = '.ports'
 user_log = '.users'
+logm_log = '.logs'
+
 machine_ip = str(urllib.request.urlopen('http://www.myexternalip.com/raw').read().decode('utf-8'))
 
 class Scanner(object):
@@ -74,6 +77,7 @@ class Scanner(object):
 				logging.info('[!] '+str(port)+" is now open")
 				issue_alert('[!] Port '+str(port)+' is now open.')
 
+
 class UserMonitor(object):
 	
 	def __init__(self):
@@ -109,12 +113,43 @@ class UserMonitor(object):
 				issue_alert('[!] User '+user+' created')
 
 
+class LogMonitor(object):
+
+	def __init__(self, threshold, auth_log_location='/var/log/auth.log'):
+		self.threshold = threshold
+		self.auth_log_location = auth_log_location
+
+	def scan(self, save=False):
+		logging.info('Checking logs...')
+		self.auth_size = os.path.getsize(self.auth_log_location)
+		logging.debug('[+] AUTH size: '+str(self.auth_size))
+		if save:
+			self.write_to_log()
+
+	def write_to_log(self):
+		f = open(logm_log, 'w')
+		f.write(str(self.auth_size))
+		f.close()
+
+	def compare_to_log(self):
+		self.scan()
+		
+		f = open(logm_log, 'r')
+		previous_auth_size = f.read()
+		f.close()
+
+		if(int(previous_auth_size) + self.threshold < self.auth_size):
+			logging.info('[!] Log increased by '+str(self.auth_size - int(previous_auth_size)))
+			issue_alert('[!] Log increased '+str(self.auth_size - int(previous_auth_size)))
+
+
 class DeltaIDS(object):
 
-	def __init__(self):
+	def __init__(self, threshold=500):
 		"""Do nothing for now, and oh it does it so well"""
 		self.scanner = Scanner('localhost')
 		self.user_monitor = UserMonitor()
+		self.log_monitor = LogMonitor(threshold)
 
 	def initialize(self):
 		"""Get the system base settings"""
@@ -122,6 +157,7 @@ class DeltaIDS(object):
 
 		self.scanner.scan(True)
 		self.user_monitor.scan(True)
+		self.log_monitor.scan(True)
 
 
 	def compare(self):
@@ -130,6 +166,7 @@ class DeltaIDS(object):
 		
 		self.scanner.compare_to_log()
 		self.user_monitor.compare_to_log()
+		self.log_monitor.compare_to_log()
 
 
 def stripped_log(logfile):
@@ -163,11 +200,17 @@ def read_configuration():
 	R_EMAIL = R_EMAIL.replace(' ','')
 	logging.debug('[DEBUG] ALERT EMAILS: '+str(R_EMAIL))
 
+	global W_USERS
+	W_USERS = config['WHITELIST']['users']
+	W_USERS = W_USERS.replace(' ','')
+	logging.debug('[DEBUG] WHITELISTED USERS: '+str(W_USERS))
+
+	global L_THRESH
+	L_THRESH = int(config['REPORTING']['threshold'])
 
 if __name__ == "__main__":
 	read_configuration()
 	parser = optparse.OptionParser(version="%prog "+version)
-	delta = DeltaIDS()
 
 	parser.add_option('-i', '--init', action='store_true', dest='initialize', default=False, help='Write inital values to log files')
 	parser.add_option('-c', '--check', action='store_true', dest='check', default=False, help='Check system settings against log files')
@@ -180,6 +223,8 @@ if __name__ == "__main__":
 		c_out = logging.StreamHandler(sys.stdout)
 		root_logger.addHandler(c_out)	
 
+	delta = DeltaIDS(L_THRESH)
+	
 	if(options.initialize):
 		delta.initialize()
 	elif(options.check):
